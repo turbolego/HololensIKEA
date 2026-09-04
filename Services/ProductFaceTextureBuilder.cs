@@ -50,6 +50,14 @@ namespace HololensIKEA.Services
         {
             var result = new MultiFaceTextures { ViewType = classification.ViewType };
 
+            // Null or zero-sized input can never produce a usable texture.
+            // Return an empty result instead of falling through to the
+            // exception path, which would emit a 0x0 FaceTextureData.
+            if (srcBgra == null || srcBgra.Length == 0 || srcWidth <= 0 || srcHeight <= 0)
+            {
+                return result;
+            }
+
             try
             {
                 // ── Front face ─────────────────────────────────────────────

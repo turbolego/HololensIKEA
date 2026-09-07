@@ -56,6 +56,10 @@ jobs:
             --quiet --norestart --force
           if ($LASTEXITCODE -notin @(0, 3010)) { exit $LASTEXITCODE }
 
+      - name: Build UWP x86 Draco decoder
+        shell: pwsh
+        run: .\.github\scripts\build-draco-uwp.ps1
+
       # Generate a throw-away self-signed cert for this run.
       # The password "ci" overrides the <PackageCertificatePassword> in the .csproj.
       - name: Create signing certificate

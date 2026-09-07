@@ -108,6 +108,10 @@ jobs:
             --quiet --norestart --force
           if ($LASTEXITCODE -notin @(0, 3010)) { exit $LASTEXITCODE }
 
+      - name: Build UWP x86 Draco decoder
+        shell: pwsh
+        run: .\.github\scripts\build-draco-uwp.ps1
+
       - name: Create signing certificate
         shell: pwsh
         run: |

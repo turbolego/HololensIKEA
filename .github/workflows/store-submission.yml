@@ -89,6 +89,10 @@ jobs:
             --quiet --norestart --force
           if ($LASTEXITCODE -notin @(0, 3010)) { exit $LASTEXITCODE }
 
+      - name: Build UWP x86 Draco decoder
+        shell: pwsh
+        run: .\.github\scripts\build-draco-uwp.ps1
+
       # ── Generate a temporary cert for building ───────────────────────
       # The Store-signed package will be re-signed by Partner Center;
       # we just need something to get past MSBuild's signing requirement.

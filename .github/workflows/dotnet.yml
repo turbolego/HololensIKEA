@@ -42,6 +42,10 @@ jobs:
             --quiet --norestart --force
           if ($LASTEXITCODE -notin @(0, 3010)) { exit $LASTEXITCODE }
 
+      - name: Build UWP x86 Draco decoder
+        shell: pwsh
+        run: .\.github\scripts\build-draco-uwp.ps1
+
       - name: Build ${{ matrix.configuration }} | x86
         run: >
           msbuild HololensIKEA.csproj /m

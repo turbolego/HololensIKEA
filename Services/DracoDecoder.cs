@@ -21,6 +21,7 @@ namespace HololensIKEA.Services
 
         private enum DataType : uint
         {
+            Int32 = 5,
             UInt8 = 2,
             UInt16 = 4,
             UInt32 = 6,
@@ -137,7 +138,11 @@ namespace HololensIKEA.Services
                 if (data.Ptr == IntPtr.Zero || data.Size == 0) return null;
                 int count = checked((int)(data.Size / SizeOf(data.Type)));
                 var result = new uint[count];
-                if (data.Type == DataType.UInt32)
+                // Evergine's native wrapper exports mesh indices as DT_INT32
+                // (the values are non-negative triangle indices, but the
+                // wrapper's DataType is signed). Treat both 32-bit forms as
+                // unsigned index values after copying the raw bits.
+                if (data.Type == DataType.Int32 || data.Type == DataType.UInt32)
                 {
                     var values = new int[count];
                     Marshal.Copy(data.Ptr, values, 0, count);
@@ -168,7 +173,7 @@ namespace HololensIKEA.Services
         {
             if (type == DataType.UInt8) return 1;
             if (type == DataType.UInt16) return 2;
-            if (type == DataType.UInt32 || type == DataType.Float32) return 4;
+            if (type == DataType.Int32 || type == DataType.UInt32 || type == DataType.Float32) return 4;
             return 0;
         }
     }

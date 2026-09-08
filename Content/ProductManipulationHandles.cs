@@ -37,6 +37,13 @@ namespace HololensIKEA.Content
         private static readonly Vector3 ColorRotateX   = new Vector3(0.20f, 1.00f, 0.45f); // green   (X-axis)
         private static readonly Vector3 ColorMove      = new Vector3(0.55f, 0.55f, 1.00f); // blue    (move)
 
+        // ── Trashcan button placement (fixed physical offset, independent of box size) ─
+        private const float TrashRightOffsetMeters     = 0.20f;  // 20 cm right of the model's right side
+        private const float TrashTopOffsetMeters       = 0.30f;  // 30 cm above the model's top
+        private const float TrashButtonHalfWidthMeters = 0.06f;
+        private const float TrashButtonHalfHeightMeters = 0.06f;
+        private Vector3                   _lastTrashDims = Vector3.Zero;
+
         // ── D3D objects ───────────────────────────────────────────────────
         private readonly DeviceResources _dr;
         private InputLayout    _inputLayout;
@@ -129,6 +136,9 @@ namespace HololensIKEA.Content
                   * Matrix4x4.CreateFromQuaternion(rotation)
                   * Matrix4x4.CreateTranslation(position);
             _cbData.model = Matrix4x4.Transpose(m);
+
+            if (dims != _lastTrashDims)
+                RebuildTrashcanQuad(dims);
         }
 
         /// <summary>Pushes updated CB + vertex colors to the GPU.</summary>
@@ -269,16 +279,9 @@ namespace HololensIKEA.Content
         ///   thickness = 0.08 local units (8% of each box dimension after scaling).
         ///   halfLen   = 0.30 local units (covers 60% of the face edge, centered).
         ///
-        /// Trashcan button (verts 16-19):
-        ///   Centered above the top edge, large target for easy gazing.
-        ///   x = -0.30 .. +0.30  (0.6 wide, slightly narrower than box width)
-        ///   y = 0.62 .. 0.78    (0.16 tall, well above the top handle)
-        ///   z = 0.52
-        ///
-        /// Trash can icon (verts 20-31): drawn on the button face.
-        ///   Body:  verts 20-23  (wide rectangle, bottom half of button)
-        ///   Lid:   verts 24-27  (slightly wider, top of button)
-        ///   Handle: verts 28-31 (small loop on lid)
+        /// Trashcan button (verts 16-31): positioned by RebuildTrashcanQuad at a
+        /// fixed physical offset (20 cm right of the box, 30 cm above the box),
+        /// independent of the box's dimensions.
         /// </summary>
         private void BuildHandlePositions()
         {
@@ -295,38 +298,10 @@ namespace HololensIKEA.Content
             // Bottom(RotateX) — horizontal strip on the bottom edge
             SetQuad(12, -halfLen,          -0.5f - thickness, halfLen, -0.5f,  z);
 
-            // ── Trashcan button (large, centered above top edge) ─────────
-            const float btnW = 0.30f;   // half-width
-            const float btnH = 0.08f;   // half-height
-            const float btnY =  0.5f + thickness + btnH;  // 0.66
-            const float btnZ =  z;
-            // Button background (verts 16-19)
-            SetQuad(16, -btnW, btnY - btnH, btnW, btnY + btnH, btnZ);
-
-            // ── Trash can icon on button face ────────────────────────────
-            // All icon quads are drawn slightly in front of the button (z+0.01)
-            const float iconZ = btnZ + 0.01f;
-
-            // Icon body — wide rectangle filling lower ~60% of button
-            const float bodyW    = btnW * 0.75f;   // 0.225
-            const float bodyH    = btnH * 0.85f;   // 0.068
-            const float bodyYBot = btnY - btnH * 0.3f;
-            const float bodyYTop = bodyYBot + bodyH;
-            SetQuad(20, -bodyW, bodyYBot, bodyW, bodyYTop, iconZ);
-
-            // Icon lid — slightly wider rectangle at top
-            const float lidW     = btnW * 0.85f;   // 0.255
-            const float lidH     = btnH * 0.35f;   // 0.028
-            const float lidYBot  = bodyYTop - btnH * 0.1f;
-            const float lidYTop  = lidYBot + lidH;
-            SetQuad(24, -lidW, lidYBot, lidW, lidYTop, iconZ);
-
-            // Icon handle — small loop on top of lid
-            const float handleW  = btnW * 0.30f;   // 0.09
-            const float handleH  = btnH * 0.45f;   // 0.036
-            const float handleYBot = lidYTop;
-            const float handleYTop = handleYBot + handleH;
-            SetQuad(28, -handleW, handleYBot, handleW, handleYTop, iconZ);
+            // Trashcan button (verts 16-31): fixed physical offset from the box,
+            // computed relative to the box's local unit-space so it lands at a
+            // constant real-world position regardless of box dimensions.
+            RebuildTrashcanQuad(Vector3.One);
 
             // ── Dedicated command bar below the model ────────────────────
             // Independent targets for Move, Rotate, and Delete. Keeping this
@@ -338,6 +313,50 @@ namespace HololensIKEA.Content
             SetQuad(40,  0.18f, commandY0,  0.48f, commandY1, z);
 
             RebuildVertexColors();
+        }
+
+        /// <summary>
+        /// Positions the trashcan button + icon quads (verts 16-31) so that, once
+        /// scaled by the box's Scale(dims) model matrix, the button sits at a fixed
+        /// physical offset (20 cm right of the box, 30 cm above the box) regardless
+        /// of the box's actual dimensions. Must be called whenever dims change.
+        /// </summary>
+        private void RebuildTrashcanQuad(Vector3 dims)
+        {
+            if (dims.X <= 0f || dims.Y <= 0f) return;
+
+            float btnCX = 0.5f + TrashRightOffsetMeters / dims.X;
+            float btnCY = 0.5f + TrashTopOffsetMeters   / dims.Y;
+            float btnHX = TrashButtonHalfWidthMeters  / dims.X;
+            float btnHY = TrashButtonHalfHeightMeters / dims.Y;
+            const float btnZ  = 0.52f;
+            const float iconZ = btnZ + 0.01f;
+
+            // Button background (verts 16-19)
+            SetQuad(16, btnCX - btnHX, btnCY - btnHY, btnCX + btnHX, btnCY + btnHY, btnZ);
+
+            // Icon body — wide rectangle filling lower ~60% of button (verts 20-23)
+            float bodyW    = btnHX * 0.75f;
+            float bodyH    = btnHY * 0.85f;
+            float bodyYBot = btnCY - btnHY * 0.3f;
+            float bodyYTop = bodyYBot + bodyH;
+            SetQuad(20, btnCX - bodyW, bodyYBot, btnCX + bodyW, bodyYTop, iconZ);
+
+            // Icon lid — slightly wider rectangle at top (verts 24-27)
+            float lidW    = btnHX * 0.85f;
+            float lidH    = btnHY * 0.35f;
+            float lidYBot = bodyYTop - btnHY * 0.1f;
+            float lidYTop = lidYBot + lidH;
+            SetQuad(24, btnCX - lidW, lidYBot, btnCX + lidW, lidYTop, iconZ);
+
+            // Icon handle — small loop on top of lid (verts 28-31)
+            float handleW    = btnHX * 0.30f;
+            float handleH    = btnHY * 0.45f;
+            float handleYBot = lidYTop;
+            float handleYTop = handleYBot + handleH;
+            SetQuad(28, btnCX - handleW, handleYBot, btnCX + handleW, handleYTop, iconZ);
+
+            _lastTrashDims = dims;
         }
 
         /// <summary>Sets 4 vertices [base .. base+3] for a flat axis-aligned quad.</summary>
@@ -394,25 +413,16 @@ namespace HololensIKEA.Content
         /// </summary>
         public void UpdateTrashcanBounds(Vector3 position, Vector3 dims, Quaternion rotation)
         {
-            // Local-space centre of the trashcan button (unit-box coords).
-            // Centered above the top edge.
-            const float localCX =  0f;
-            const float localCY =  0.5f + 0.08f + 0.08f;  // 0.66 (above top handle)
-            const float localCZ =  0.52f;
-            // Local half-sizes — much larger button for easier gazing.
-            const float localHX = 0.30f;
-            const float localHY = 0.08f;
-            const float localHZ = 0.01f;  // thin
+            // Fixed physical offset: 20 cm right of the right edge, 30 cm above the top edge.
+            // Computed directly in world units so the target matches the visual button
+            // regardless of the box's dimensions (see RebuildTrashcanQuad).
+            var rightVec = Vector3.Transform(Vector3.UnitX, rotation) * (dims.X * 0.5f + TrashRightOffsetMeters);
+            var topVec   = Vector3.Transform(Vector3.UnitY, rotation) * (dims.Y * 0.5f + TrashTopOffsetMeters);
+            TrashcanWorldPos = position + rightVec + topVec;
 
-            // Transform centre to world space.
-            var worldCentre = Vector3.Transform(
-                new Vector3(localCX, localCY, localCZ), rotation) + position;
-            TrashcanWorldPos = worldCentre;
-
-            // Transform half-extents (simplified: use rotation on each axis separately).
-            var hx = Vector3.Transform(Vector3.UnitX, rotation) * localHX * dims.X;
-            var hy = Vector3.Transform(Vector3.UnitY, rotation) * localHY * dims.Y;
-            var hz = Vector3.Transform(Vector3.UnitZ, rotation) * localHZ * dims.Z;
+            var hx = Vector3.Transform(Vector3.UnitX, rotation) * TrashButtonHalfWidthMeters;
+            var hy = Vector3.Transform(Vector3.UnitY, rotation) * TrashButtonHalfHeightMeters;
+            var hz = Vector3.Transform(Vector3.UnitZ, rotation) * 0.01f;
             TrashcanHalfExt = new Vector3(
                 Math.Abs(hx.X) + Math.Abs(hy.X) + Math.Abs(hz.X),
                 Math.Abs(hx.Y) + Math.Abs(hy.Y) + Math.Abs(hz.Y),
@@ -421,7 +431,8 @@ namespace HololensIKEA.Content
             for (int button = 0; button < 3; button++)
             {
                 float cx = -0.33f + button * 0.33f;
-                var centre = Vector3.Transform(new Vector3(cx, -0.70f, 0.52f), rotation) + position;
+                var localPt = new Vector3(cx * dims.X, -0.70f * dims.Y, 0.52f * dims.Z);
+                var centre = Vector3.Transform(localPt, rotation) + position;
                 CommandWorldPos[button] = centre;
                 var bx = Vector3.Transform(Vector3.UnitX, rotation) * 0.15f * dims.X;
                 var by = Vector3.Transform(Vector3.UnitY, rotation) * 0.08f * dims.Y;

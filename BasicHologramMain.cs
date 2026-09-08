@@ -740,11 +740,9 @@ namespace HololensIKEA
 
                                 if (isDoubleTap && _activeMeshData != null)
                                 {
-                                    // Double-tap: toggle trashcan visibility
-                                    bool newState = !_manipulationHandles.TrashcanVisible;
-                                    _manipulationHandles.SetTrashcanVisible(newState);
-                                    Debug.WriteLine("[Input] Double-tap on mesh — trashcan " +
-                                        (newState ? "shown" : "hidden"));
+                                    // Double-tap: delete the model directly.
+                                    Debug.WriteLine("[Input] Double-tap on mesh — show delete dialog");
+                                    ShowDeleteMeshDialog(-1);
                                 }
                                 else if (_manipulationHandles.TrashcanVisible)
                                 {

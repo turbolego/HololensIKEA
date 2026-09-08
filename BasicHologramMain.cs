@@ -1400,7 +1400,7 @@ namespace HololensIKEA
                             // Always show the placeholder box as a fallback while the
                             // 3D mesh loads, or if the mesh never arrives. The mesh
                             // replaces the box once _activeMeshData is set.
-                            if (_activeMeshData == null)
+                            if (_activeMeshData == null && _productDims.X > 0f && _productDims.Y > 0f && _productDims.Z > 0f)
                             {
                                 productBoxRenderer.SetPosition(_productPosition);
                                 productBoxRenderer.SetDimensions(_productDims.X, _productDims.Y, _productDims.Z);
@@ -1431,7 +1431,8 @@ namespace HololensIKEA
                             }
 
                             _manipulationHandles.Render();  // edge rotation handles (only visible when gazing)
-                            _dimensionLabels.Render();      // dimension labels in mm
+                            if (_activeMeshData != null || _productDims.X > 0f)
+                                _dimensionLabels.Render();      // dimension labels in mm
                         }
                         else
                         {
@@ -2133,7 +2134,19 @@ namespace HololensIKEA
                 _isDraggingMesh = false;
                 _isRotatingMesh = false;
                 _manipulationHandles.SetHighlight(ManipulationZone.None);
-                Debug.WriteLine("[Delete] Active mesh deleted — box hidden");
+                _manipulationHandles.CommandBarVisible = false;
+                _activeTextureSRV?.Dispose(); _activeTextureSRV = null;
+                _activeDispSRV?.Dispose();    _activeDispSRV = null;
+                _activeSideSRV?.Dispose();    _activeSideSRV = null;
+                _currentProduct = null;
+                _pendingBookmarkGlbUrl = "";
+
+                // Nothing is being shown anymore — return to the bookmarks list so
+                // the user can immediately pick another product.
+                appState = AppState.InputMode;
+                inputBuffer = "";
+                ShowBookmarksDialog();
+                Debug.WriteLine("[Delete] Active mesh deleted — returning to bookmarks");
             }
             else if (idx >= 0 && idx < _productInstances.Count)
             {

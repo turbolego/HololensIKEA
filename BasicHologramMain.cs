@@ -134,8 +134,6 @@ namespace HololensIKEA
         private GltfMeshData                   _activeMeshData;
         private Task<GltfMeshData>             _pending3DModelLoad;
         private bool                           _activeProductRequiresMesh;
-        private enum ModelCommandMode { Direct, Move, Rotate }
-        private ModelCommandMode               _modelCommandMode = ModelCommandMode.Direct;
 
         // --- 3D mesh independent transform ---
         private Vector3    _meshPosition = new Vector3(0f, 0f, -2f);
@@ -155,7 +153,7 @@ namespace HololensIKEA
         private bool                       _deleteDialogShowing = false;
         private int                        _deleteTargetInstanceIndex = -1;  // -1 = active mesh
 
-        // --- Double-tap for trashcan toggle ---
+        // --- Double-tap for mesh deletion ---
         private DateTime      _lastMeshTapTime = DateTime.MinValue;
         private const int     DoubleTapWindowMs = 400;
 
@@ -567,10 +565,6 @@ namespace HololensIKEA
                     _gazeOnProduct = _activeMeshData == null && !_activeProductRequiresMesh &&
                         GazeHitsBox(gO, gD, activePosition, activeDimensions * 0.5f, 10f, out hd);
                     _manipulationHandles.IsVisible = _gazeOnMesh || _gazeOnProduct;
-                    _manipulationHandles.CommandBarVisible = _activeMeshData != null;
-                    // Show trashcan only when gazing at a product that has a loaded 3D mesh.
-                    // Trashcan stays visible once toggled on via double-tap (independent of gaze).
-                    _manipulationHandles.ShowTrashcan = _gazeOnMesh;
                     if (_manipulationHandles.IsVisible)
                     {
                         var localOff = Vector3.Transform(
@@ -586,25 +580,17 @@ namespace HololensIKEA
                         else                 hz = ManipulationZone.MoveCenter;
                     }
                     _manipulationHandles.SetHighlight(hz);
-                    // Update trashcan world bounds for hit-testing.
-                    // Must update even when not gazing (trashcan may be toggled on via double-tap).
-                    if (_activeMeshData != null)
-                    {
-                        _manipulationHandles.UpdateTrashcanBounds(
-                            activePosition, activeDimensions, activeRotation);
-                    }
                 }
 
                 // Air-tap / pinch-drag dispatch.
                 //
                 // Priority:
                 //   0. Bookmarks panel title bar → start dragging the panel
-                //   1. ShowingProduct + trashcan hit → delete confirmation dialog
-                //   2. ShowingProduct + gaze hits product edge zone  → start rotation
-                //   3. ShowingProduct + gaze hits product center zone → start drag
-                //   4. ShowingProduct + gaze hits 3D mesh → start mesh drag/rotate
-                //   5. Keyboard visible → route tap to keyboard
-                //   6. Otherwise → position spinning cube
+                //   1. ShowingProduct + gaze hits product edge zone  → start rotation
+                //   2. ShowingProduct + gaze hits product center zone → start drag
+                //   3. ShowingProduct + gaze hits 3D mesh → start mesh drag/rotate or confirm double-tap deletion
+                //   4. Keyboard visible → route tap to keyboard
+                //   5. Otherwise → position spinning cube
                 if (pointerState != null && !_isDraggingBookmarks && _bookmarksDialog != null
                     && _bookmarksDialog.IsVisible && _bookmarksDialog.IsGazeOnTitleBar)
                 {
@@ -645,48 +631,11 @@ namespace HololensIKEA
                         bool hitMesh = _activeMeshData != null &&
                                        GazeHitsBox(rayOrigin, rayDir, _meshPosition,
                                        _meshDims * 0.5f, 10f, out meshHitDist);
+                        bool sceneTapped = hitProduct || hitMesh;
 
-                        // Priority 1: dedicated command bar; it is independent of
-                        // the edge handles and remains visible below the mesh.
-                        bool commandTapped = false;
-                        if (_activeMeshData != null && _manipulationHandles.CommandBarVisible)
+                        if (hitProduct && (!hitMesh || hitDist <= meshHitDist))
                         {
-                            for (int command = 0; command < 3; command++)
-                            {
-                                float commandHitDist;
-                                if (!GazeHitsBox(rayOrigin, rayDir,
-                                    _manipulationHandles.CommandWorldPos[command],
-                                    _manipulationHandles.CommandHalfExt[command], 10f, out commandHitDist))
-                                    continue;
-                                if (command == 0) _modelCommandMode = ModelCommandMode.Move;
-                                else if (command == 1) _modelCommandMode = ModelCommandMode.Rotate;
-                                else ShowDeleteMeshDialog(-1);
-                                commandTapped = true;
-                                Debug.WriteLine("[Input] Command bar: " + (command == 0 ? "Move" : command == 1 ? "Rotate" : "Delete"));
-                                break;
-                            }
-                        }
-
-                        // Priority 2: legacy trashcan hit → delete confirmation dialog.
-                        bool trashcanTapped = commandTapped;
-                        if (_manipulationHandles.ShowTrashcan && _activeMeshData != null)
-                        {
-                            float tcHitDist;
-                            if (GazeHitsBox(rayOrigin, rayDir,
-                                _manipulationHandles.TrashcanWorldPos,
-                                _manipulationHandles.TrashcanHalfExt, 10f, out tcHitDist))
-                            {
-                                Debug.WriteLine("[Input] Air-tap on trashcan — show delete dialog");
-                                ShowDeleteMeshDialog(/* instanceIndex */ -1);
-                                trashcanTapped = true;
-                            }
-                        }
-
-                        if (!trashcanTapped)
-                        {
-                            if (hitProduct && (!hitMesh || hitDist <= meshHitDist))
-                            {
-                                // Determine zone: outer 38% of each axis = rotation handle.
+                            // Determine zone: outer 38% of each axis = rotation handle.
                                 var localOff = Vector3.Transform(
                                     rayOrigin + rayDir * hitDist - _productPosition,
                                     Quaternion.Inverse(_productRotation));
@@ -730,29 +679,22 @@ namespace HololensIKEA
                                     _manipulationHandles.SetHighlight(ManipulationZone.MoveCenter);
                                     Debug.WriteLine("[Drag] Started at dist=" + hitDist.ToString("F2"));
                                 }
-                            }
-                            else if (hitMesh)
-                            {
-                                // Hit the 3D mesh model — detect double-tap for trashcan toggle
-                                var now = DateTime.UtcNow;
-                                bool isDoubleTap = (now - _lastMeshTapTime).TotalMilliseconds <= DoubleTapWindowMs;
-                                _lastMeshTapTime = now;
+                        }
+                        else if (hitMesh)
+                        {
+                            // Hit the 3D mesh model — detect double-tap for deletion.
+                            var now = DateTime.UtcNow;
+                            bool isDoubleTap = (now - _lastMeshTapTime).TotalMilliseconds <= DoubleTapWindowMs;
+                            _lastMeshTapTime = now;
 
-                                if (isDoubleTap && _activeMeshData != null)
-                                {
-                                    // Double-tap: delete the model directly.
-                                    Debug.WriteLine("[Input] Double-tap on mesh — show delete dialog");
-                                    ShowDeleteMeshDialog(-1);
-                                }
-                                else if (_manipulationHandles.TrashcanVisible)
-                                {
-                                    // Single-tap on mesh while trashcan is visible → hide it
-                                    _manipulationHandles.SetTrashcanVisible(false);
-                                    Debug.WriteLine("[Input] Single-tap on mesh — hiding trashcan");
-                                }
-                                else
-                                {
-                                    // Normal single-tap: start mesh drag or rotation
+                            if (isDoubleTap && _activeMeshData != null)
+                            {
+                                Debug.WriteLine("[Input] Double-tap on mesh — show delete dialog");
+                                ShowDeleteMeshDialog(-1);
+                            }
+                            else
+                            {
+                                // Normal single-tap: start mesh drag or rotation
                                     meshHitDist = 0f;
                                     GazeHitsBox(rayOrigin, rayDir, _meshPosition, _meshDims * 0.5f, 10f, out meshHitDist);
                                     var localOff = Vector3.Transform(
@@ -761,26 +703,19 @@ namespace HololensIKEA
                                     float nx = _meshDims.X > 0 ? localOff.X / (_meshDims.X * 0.5f) : 0;
                                     float ny = _meshDims.Y > 0 ? localOff.Y / (_meshDims.Y * 0.5f) : 0;
                                     const float edge = 0.62f;
-                                    bool inEdge = _modelCommandMode == ModelCommandMode.Rotate ||
-                                                  (_modelCommandMode != ModelCommandMode.Move &&
-                                                   (Math.Abs(nx) > edge || Math.Abs(ny) > edge));
+                                    bool inEdge = Math.Abs(nx) > edge || Math.Abs(ny) > edge;
 
                                     if (inEdge)
                                     {
-                                        // Start mesh rotation — also hide trashcan
-                                        _manipulationHandles.SetTrashcanVisible(false);
                                         _meshRotationAxis    = Math.Abs(nx) > Math.Abs(ny) ? Vector3.UnitY : Vector3.UnitX;
                                         _meshRotStartGazeDir = rayDir;
                                         _meshRotStartQuat    = _meshRotation;
                                         _isRotatingMesh      = true;
-                                        _modelCommandMode     = ModelCommandMode.Direct;
                                         Debug.WriteLine("[MeshRotate] Started axis=" +
                                             (_meshRotationAxis == Vector3.UnitY ? "Y" : "X"));
                                     }
                                     else
                                     {
-                                        // Start mesh drag — also hide trashcan
-                                        _manipulationHandles.SetTrashcanVisible(false);
                                         var loc = pointerState.Properties.TryGetLocation(
                                                       stationaryReferenceFrame.CoordinateSystem);
                                         if (loc?.Position != null)
@@ -794,43 +729,42 @@ namespace HololensIKEA
                                         }
                                         _meshDragGazeDistance = meshHitDist;
                                         _isDraggingMesh = true;
-                                        _modelCommandMode = ModelCommandMode.Direct;
                                         Debug.WriteLine("[MeshDrag] Started at dist=" + meshHitDist.ToString("F2"));
                                     }
-                                }
                             }
-                            else
+                        }
+                        else
+                        {
+                            // Check saved instances for 3D mesh hits
+                            for (int i = 0; i < _productInstances.Count; i++)
                             {
-                                // Check saved instances for 3D mesh hits
-                                for (int i = 0; i < _productInstances.Count; i++)
+                                var inst = _productInstances[i];
+                                if (inst.MeshData != null)
                                 {
-                                    var inst = _productInstances[i];
-                                    if (inst.MeshData != null)
+                                    float instHitDist;
+                                    if (GazeHitsBox(rayOrigin, rayDir, inst.MeshPosition,
+                                        inst.HalfExtents, 10f, out instHitDist))
                                     {
-                                        float instHitDist;
-                                        if (GazeHitsBox(rayOrigin, rayDir, inst.MeshPosition,
-                                            inst.HalfExtents, 10f, out instHitDist))
-                                        {
-                                            // Tap on a saved instance mesh — show its delete dialog.
-                                            ShowDeleteMeshDialog(i);
-                                            break;
-                                        }
+                                        // Tap on a saved instance mesh — show its delete dialog.
+                                        sceneTapped = true;
+                                        ShowDeleteMeshDialog(i);
+                                        break;
                                     }
                                 }
                             }
                         }
-                        else if (_searchResultsDialog != null && _searchResultsDialog.IsVisible)
+                        if (!sceneTapped && _searchResultsDialog != null && _searchResultsDialog.IsVisible)
                         {
                             // Tap missed the product box — check search results dialog
                             Debug.WriteLine("[Input] Air-tap on search dialog");
                             _searchResultsDialog.HandleAirTap();
                         }
-                        else if (_bookmarksDialog != null && _bookmarksDialog.IsVisible)
+                        else if (!sceneTapped && _bookmarksDialog != null && _bookmarksDialog.IsVisible)
                         {
                             Debug.WriteLine("[Input] Air-tap on bookmarks dialog");
                             _bookmarksDialog.HandleAirTap();
                         }
-                        else if (keyboardInputHandler.IsVisible)
+                        else if (!sceneTapped && keyboardInputHandler.IsVisible)
                         {
                             // Tap missed the product box — route to keyboard.
                             Debug.WriteLine("[Input] Air-tap on keyboard (missed product)");
@@ -1084,7 +1018,6 @@ namespace HololensIKEA
                     // Reset rotation for the new product.
                     _productRotation = Quaternion.Identity;
                     _isRotating      = false;
-                    _modelCommandMode = ModelCommandMode.Direct;
                     productBoxRenderer.SetRotation(Quaternion.Identity);
                     productSpriteRenderer.SetRotation(Quaternion.Identity);
                     _manipulationHandles.SetHighlight(ManipulationZone.None);
@@ -1208,7 +1141,6 @@ namespace HololensIKEA
                     var activePosition = _activeMeshData != null ? _meshPosition : _productPosition;
                     var activeDimensions = _activeMeshData != null ? _meshDims : _productDims;
                     var activeRotation = _activeMeshData != null ? _meshRotation : _productRotation;
-                    _manipulationHandles.CommandBarVisible = _activeMeshData != null;
                     _manipulationHandles.SetTransform(activePosition, activeDimensions, activeRotation);
                     _manipulationHandles.Update();
                     // Update dimension labels to follow the visible product representation.
@@ -2134,7 +2066,6 @@ namespace HololensIKEA
                 _isDraggingMesh = false;
                 _isRotatingMesh = false;
                 _manipulationHandles.SetHighlight(ManipulationZone.None);
-                _manipulationHandles.CommandBarVisible = false;
                 _activeTextureSRV?.Dispose(); _activeTextureSRV = null;
                 _activeDispSRV?.Dispose();    _activeDispSRV = null;
                 _activeSideSRV?.Dispose();    _activeSideSRV = null;

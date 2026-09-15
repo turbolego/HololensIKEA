@@ -104,9 +104,12 @@ namespace HololensIKEA.Content
             {
                 var pos = meshData.Positions[i];
                 var norm = meshData.Normals[i];
+                var materialColor = meshData.Colors != null && meshData.Colors.Length == meshData.Positions.Length
+                    ? meshData.Colors[i]
+                    : baseColor;
                 float ndotl = Math.Max(0, Vector3.Dot(norm, lightDir));
                 float brightness = ambient + diffuseStrength * ndotl;
-                Vector3 col = baseColor * brightness;
+                Vector3 col = materialColor * brightness;
                 // Clamp
                 col = Vector3.Max(Vector3.Zero, Vector3.Min(Vector3.One, col));
                 vertices[i] = new VertexPositionColor(pos, col);

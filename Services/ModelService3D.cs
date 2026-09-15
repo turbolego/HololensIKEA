@@ -19,6 +19,7 @@ namespace HololensIKEA.Services
         public Vector3[] Positions { get; set; }
         public Vector3[] Normals { get; set; }
         public ushort[] Indices { get; set; }
+        public Vector3[] Colors { get; set; }
         public Vector4 BaseColor { get; set; } = new Vector4(0.72f, 0.72f, 0.72f, 1f);
         public Vector3 BoundsMeters { get; set; }
         public Vector3 CenterOffset { get; set; }
@@ -201,6 +202,7 @@ namespace HololensIKEA.Services
             if (accessors == null || views == null || meshes == null) return null;
             var positions = new List<Vector3>();
             var normals = new List<Vector3>();
+            var colors = new List<Vector3>();
             var indices = new List<ushort>();
             foreach (var mesh in meshes)
             {
@@ -232,7 +234,7 @@ namespace HololensIKEA.Services
                             return null;
                         }
                         AppendPrimitive(decodedPositions, decodedNormals, decodedIndices,
-                            positions, normals, indices);
+                            positions, normals, colors, indices, MaterialColor(root, primitive));
                         continue;
                     }
                     var attrs = primitive["attributes"];
@@ -255,10 +257,20 @@ namespace HololensIKEA.Services
                         for (var i = 0; i < localIndices.Length; i++) localIndices[i] = (uint)i;
                     }
                     AppendPrimitive(localPositions, localNormals, localIndices,
-                        positions, normals, indices);
+                        positions, normals, colors, indices, MaterialColor(root, primitive));
                 }
             }
             if (positions.Count == 0 || indices.Count < 3) return null;
+            var maxIndex = 0;
+            for (var i = 0; i < indices.Count; i++)
+            {
+                if (indices[i] > maxIndex) maxIndex = indices[i];
+            }
+            if (maxIndex >= positions.Count)
+            {
+                Debug.WriteLine("[IKEA] Invalid mesh indices: max=" + maxIndex + " vertices=" + positions.Count);
+                return null;
+            }
             var min = positions[0];
             var max = positions[0];
             foreach (var p in positions) { min = Vector3.Min(min, p); max = Vector3.Max(max, p); }
@@ -267,16 +279,32 @@ namespace HololensIKEA.Services
             var maxRange = Math.Max(range.X, Math.Max(range.Y, range.Z));
             var scale = maxRange > 20f ? 0.001f : 1f;
             for (var i = 0; i < positions.Count; i++) positions[i] = (positions[i] - center) * scale;
-            return new GltfMeshData { Positions = positions.ToArray(), Normals = normals.ToArray(), Indices = indices.ToArray(), BoundsMeters = range * scale, CenterOffset = center * scale };
+            Debug.WriteLine("[IKEA] Parsed mesh: vertices=" + positions.Count +
+                " indices=" + indices.Count + " triangles=" + (indices.Count / 3) +
+                " materials=" + colors.Distinct().Count() + " maxIndex=" + maxIndex);
+            return new GltfMeshData { Positions = positions.ToArray(), Normals = normals.ToArray(), Colors = colors.ToArray(), Indices = indices.ToArray(), BoundsMeters = range * scale, CenterOffset = center * scale };
+        }
+
+        private static Vector3 MaterialColor(JObject root, JToken primitive)
+        {
+            var materialIndex = primitive["material"]?.Value<int>() ?? -1;
+            var materials = root["materials"] as JArray;
+            var color = materials != null && materialIndex >= 0 && materialIndex < materials.Count
+                ? materials[materialIndex]["pbrMetallicRoughness"]?["baseColorFactor"] as JArray
+                : null;
+            if (color == null || color.Count < 3) return new Vector3(0.72f, 0.72f, 0.72f);
+            return new Vector3(color[0].Value<float>(), color[1].Value<float>(), color[2].Value<float>());
         }
 
         private static void AppendPrimitive(
             Vector3[] localPositions, Vector3[] localNormals, uint[] localIndices,
-            List<Vector3> positions, List<Vector3> normals, List<ushort> indices)
+            List<Vector3> positions, List<Vector3> normals, List<Vector3> colors,
+            List<ushort> indices, Vector3 color)
         {
             var baseVertex = positions.Count;
             positions.AddRange(localPositions);
             normals.AddRange(localNormals);
+            for (var i = 0; i < localPositions.Length; i++) colors.Add(color);
             foreach (var index in localIndices)
             {
                 var absolute = (ulong)baseVertex + index;

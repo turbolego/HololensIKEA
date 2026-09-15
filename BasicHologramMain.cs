@@ -1070,6 +1070,12 @@ namespace HololensIKEA
                     _meshRotation = _productRotation;
 
                     Debug.WriteLine("[IKEA] 3D model loaded: " + _activeMeshData.Positions.Length + " verts, " + (_activeMeshData.Indices.Length / 3) + " tris");
+                    var maxLoadedIndex = 0;
+                    for (var index = 0; index < _activeMeshData.Indices.Length; index++)
+                        if (_activeMeshData.Indices[index] > maxLoadedIndex) maxLoadedIndex = _activeMeshData.Indices[index];
+                    Debug.WriteLine("[IKEA] 3D indices: count=" + _activeMeshData.Indices.Length +
+                        " max=" + maxLoadedIndex +
+                        " colors=" + (_activeMeshData.Colors == null ? 0 : _activeMeshData.Colors.Length));
                     Debug.WriteLine("[IKEA] Mesh bounds (m): " + _meshDims.X.ToString("F3") + " x " + _meshDims.Y.ToString("F3") + " x " + _meshDims.Z.ToString("F3"));
                     Debug.WriteLine("[IKEA] Product dims (m): " + _productDims.X.ToString("F3") + " x " + _productDims.Y.ToString("F3") + " x " + _productDims.Z.ToString("F3"));
                 }

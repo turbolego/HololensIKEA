@@ -237,6 +237,18 @@ ClientBin/
 *.dbproj.schemaview
 *.jfm
 *.pfx
+
+# Local environment and private signing material
+.env
+.env.*
+!.env.example
+secrets.json
+local.settings.json
+*.p12
+*.pem
+*.key
+*.p8
+*.keystore
 # Exception: the project's own dev-signing certificate is self-signed,
 # carries no CA trust, is used only for local sideloading, and is
 # re-creatable from scripts/create_cert.ps1.  Committing it makes the
